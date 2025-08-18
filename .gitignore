@@ -35,3 +35,4 @@ Thumbs.db                     # Windows
 # === Lock file (optional, ignore only if you don’t want to lock provider versions) ===
 # .terraform.lock.hcl
 .terraform/
+.terraform/
