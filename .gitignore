@@ -36,3 +36,4 @@ Thumbs.db                     # Windows
 # .terraform.lock.hcl
 .terraform/
 .terraform/
+.terraform/
