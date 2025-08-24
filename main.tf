@@ -49,6 +49,16 @@ resource "aws_security_group" "ssh_only" {
     cidr_blocks = [local.ssh_cidr_effective]
   }
 
+   # NEW: allow 8080 from within the VPC (agents -> controller)
+  ingress {
+    description = "Jenkins HTTP from VPC"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+  }
+
+
   egress {
     description = "All egress"
     from_port   = 0

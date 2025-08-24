@@ -1,42 +1,69 @@
 pipeline {
-    agent any
-
     tools {
-        // Use tools that are ACTUALLY configured in Jenkins (check Global Tool Config)
-        jdk 'myjava'      // ✅ replace with your actual JDK name
-        maven 'mymaven'    // ✅ replace with your actual Maven name
+        jdk 'myjava'
+        maven 'mymaven'
     }
-
-    environment {
-        JAVA_HOME = "${tool 'myjava'}"
-        MAVEN_HOME = "${tool 'mymaven'}"
-        PATH = "${env.JAVA_HOME}/bin:${env.MAVEN_HOME}/bin:${env.PATH}"
-    }
-
+    
+    agent none
+    
     stages {
-        stage('Compile the code') {
+        stage('Checkout') {
+            agent {
+                label 'agent1'
+            }
             steps {
+                echo 'Cloning...'
+                git 'https://github.com/theitern/ClassDemoProject.git'
+            }
+        }
+        
+        stage('Compile') {
+            agent {
+                label 'agent1'
+            }
+            steps {
+                echo 'Compiling...'
                 sh 'mvn compile'
             }
         }
-
-        stage('Code Analysis') {
+        
+        stage('CodeReview') {
+            agent {
+                label 'agent1'
+            }
             steps {
+                echo 'Code Review...'
                 sh 'mvn pmd:pmd'
             }
         }
-
-        stage('Code Coverage') {
+        
+        stage('UnitTest') {
+            agent {
+                label 'agent2'
+            }
             steps {
-                sh 'mvn cobertura:cobertura -Dcobertura.report.format=xml'
+                echo 'Testing...'
+                // Re-clone source since we're on a different agent
+                git 'https://github.com/theitern/ClassDemoProject.git'
+                sh 'mvn test'
+            }
+            post {
+                success {
+                    junit 'target/surefire-reports/*.xml'
+                }
             }
         }
-
-        stage('Build the artifact') {
+        
+        stage('Package') {
+            agent {
+                label 'built-in'
+            }
             steps {
+                echo 'Packaging...'
+                // Re-clone source since we're on the controller
+                git 'https://github.com/theitern/ClassDemoProject.git'
                 sh 'mvn package'
             }
         }
     }
 }
-
