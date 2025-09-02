@@ -80,19 +80,26 @@ pipeline {
       }
     }
 
-    stage('Copy artifact to Docker host') {
-      agent { label 'built-in' }
-      steps {
-        echo 'Copying JAR to Docker host...'
-        unstash 'artifact'
-        sshagent(credentials: [env.SSH_CRED_ID]) {
-          sh '''
-            scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              target/*.jar ubuntu@${DOCKER_HOST_IP}:/home/ubuntu/app.jar
-          '''
-        }
-      }
+   stage('Copy artifact to Docker host') {
+  agent { label 'built-in' }
+  steps {
+    echo 'Copying JAR to Docker host...'
+    unstash 'artifact' // ensure target/*.jar exists on this node
+    sshagent(credentials: [env.SSH_CRED_ID]) {
+      sh '''
+        set -e
+        # show home on remote for sanity
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${DOCKER_HOST_IP} 'echo REMOTE_HOME=$HOME && hostname'
+        # copy jar directly to home
+        scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          target/*.jar ubuntu@${DOCKER_HOST_IP}:~/app.jar
+        # verify
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${DOCKER_HOST_IP} 'ls -lh ~/app.jar'
+      '''
     }
+  }
+}
+
 
     stage('Build & Push Docker image on Docker host') {
       agent { label 'built-in' }
