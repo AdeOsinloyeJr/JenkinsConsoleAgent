@@ -31,7 +31,7 @@ pipeline {
       agent { label 'agent1' }
       steps {
         echo 'Cloning source code...'
-        git url: 'https://github.com/theitern/ClassDemoProject.git', branch: 'main'
+        git url: 'https://github.com/AdeOsinloyeJr/JenkinsConsoleAgent', branch: 'main'
         stash name: 'source', includes: '**/*'
       }
     }
