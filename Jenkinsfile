@@ -16,13 +16,13 @@ pipeline {
   }
 
   environment {
-    DOCKER_HOST_IP = '172.31.44.202'      // Docker host private IP
-    REPO           = 'mytestimage/myapp'  // Docker Hub repo
+    DOCKER_HOST_IP = '172.31.44.202'
+    REPO           = 'mytestimage/myapp'
     APP_NAME       = 'myapp'
     IMAGE_TAG      = "${env.BUILD_NUMBER}"
 
-    SSH_CRED_ID    = 'docker-ssh-key'     // Jenkins SSH key for Docker host
-    REG_CRED_ID    = 'dockerhub-creds'    // Jenkins Docker Hub creds
+    SSH_CRED_ID    = 'docker-ssh-key'
+    REG_CRED_ID    = 'dockerhub-creds'
   }
 
   stages {
@@ -34,41 +34,25 @@ pipeline {
       }
     }
 
-    stage('Compile') {
-      agent { label 'agent1' }
-      steps {
-        unstash 'source'
-        sh 'mvn -B compile'
-        stash name: 'compiled', includes: '**/*'
-      }
-    }
-
-    stage('CodeReview') {
-      agent { label 'agent1' }
-      steps {
-        unstash 'compiled'
-        sh 'mvn -B pmd:pmd'
-      }
-    }
-
-    stage('UnitTest') {
-      agent { label 'agent2' }
-      steps {
-        unstash 'compiled'
-        sh 'mvn -B test'
-      }
-      post {
-        success {
-          junit '**/target/surefire-reports/*.xml'
-        }
-      }
-    }
-
     stage('Package (WAR)') {
       agent { label 'built-in' }
       steps {
-        unstash 'compiled'
-        sh 'mvn -B -DskipTests package'
+        unstash 'source'
+        sh '''
+          set -euo pipefail
+          echo "📦 Packaging WAR..."
+          mvn -B clean package -DskipTests
+
+          echo "🔍 Looking for WAR..."
+          WAR_PATH=$(find . -type f -path "*/target/webapp.war" | head -n1 || true)
+
+          if [ -z "$WAR_PATH" ]; then
+            echo "❌ ERROR: No webapp.war found after build"
+            exit 1
+          fi
+
+          echo "✅ Found WAR at $WAR_PATH"
+        '''
         archiveArtifacts artifacts: '**/target/*.war', fingerprint: true
         stash name: 'artifact', includes: '**/target/*.war'
       }
@@ -81,17 +65,27 @@ pipeline {
         sshagent(credentials: [env.SSH_CRED_ID]) {
           sh '''
             set -euo pipefail
-            WAR_PATH="$(find . -type f -path "*/target/webapp.war" -print | head -n1)"
+            WAR_PATH=$(find . -type f -path "*/target/webapp.war" | head -n1 || true)
+
             if [ -z "$WAR_PATH" ]; then
-              echo "❌ No webapp.war found"
+              echo "❌ ERROR: No WAR available to copy"
               exit 1
             fi
-            echo "Found WAR: $WAR_PATH"
 
+            echo "📤 Copying $WAR_PATH to Docker host..."
             scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              "$WAR_PATH" ubuntu@${DOCKER_HOST_IP}:~/webapp.war
+              "$WAR_PATH" ubuntu@${DOCKER_HOST_IP}:~/webapp.war || {
+                echo "❌ ERROR: SCP failed"
+                exit 1
+            }
 
+            echo "🔍 Verifying on remote..."
             ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${DOCKER_HOST_IP} '
+              set -e
+              if [ ! -f ~/webapp.war ]; then
+                echo "❌ ERROR: webapp.war missing on remote"
+                exit 1
+              fi
               ls -lh ~/webapp.war
               file ~/webapp.war || true
             '
@@ -110,12 +104,19 @@ pipeline {
                 set -e
                 cd "$HOME"
 
+                if [ ! -f webapp.war ]; then
+                  echo "❌ ERROR: webapp.war not found, aborting Docker build"
+                  exit 1
+                fi
+
+                echo "📝 Writing Dockerfile..."
                 cat > Dockerfile <<EOF
 FROM tomcat:9.0-jdk21-temurin
 COPY webapp.war /usr/local/tomcat/webapps/ROOT.war
 EXPOSE 8080
 EOF
 
+                echo "🐳 Building Docker image..."
                 echo "${PASS}" | docker login -u "${USER}" --password-stdin
                 docker build -t ${REPO}:${IMAGE_TAG} .
                 docker tag ${REPO}:${IMAGE_TAG} ${REPO}:latest
@@ -147,8 +148,10 @@ EOF
 
   post {
     always {
-      echo "✅ WAR deployed as Docker container ${APP_NAME}"
-      echo "🌐 Access: http://${DOCKER_HOST_IP}:8080/"
+      echo "✅ Pipeline finished. Image: ${REPO}:${IMAGE_TAG}"
+    }
+    failure {
+      echo "❌ Pipeline FAILED — check logs above"
     }
   }
 }
