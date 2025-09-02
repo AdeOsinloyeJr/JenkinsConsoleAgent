@@ -4,7 +4,7 @@ pipeline {
     maven 'mymaven'
   }
 
-  agent none
+  agent any   // 👈 everything runs on Jenkins itself
 
   options {
     timestamps()
@@ -12,90 +12,77 @@ pipeline {
   }
 
   triggers {
-    pollSCM('H/2 * * * *')
+    pollSCM('H/2 * * * *')   // poll GitHub every 2 minutes
   }
 
   environment {
-    DOCKER_HOST_IP = '172.31.44.202'
-    REPO           = 'mytestimage/myapp'
+    DOCKER_HOST_IP = '172.31.44.202'      // Docker EC2 private IP
+    REPO           = 'mytestimage/myapp'  // Docker Hub repo
     APP_NAME       = 'myapp'
     IMAGE_TAG      = "${env.BUILD_NUMBER}"
 
-    SSH_CRED_ID    = 'docker-ssh-key'
-    REG_CRED_ID    = 'dockerhub-creds'
+    SSH_CRED_ID    = 'docker-ssh-key'     // Jenkins SSH key for Docker host
+    REG_CRED_ID    = 'dockerhub-creds'    // Jenkins Docker Hub creds
   }
 
   stages {
     stage('Checkout') {
-      agent { label 'agent1' }
       steps {
-        git url: 'https://github.com/theitern/ClassDemoProject.git', branch: 'main'
-        stash name: 'source', includes: '**/*'
+        git url: 'https://github.com/AdeOsinloyeJr/JenkinsConsoleAgent', branch: 'main'
       }
     }
 
-    stage('Package (WAR)') {
-      agent { label 'built-in' }
+    stage('Build WAR') {
       steps {
-        unstash 'source'
         sh '''
           set -euo pipefail
-          echo "📦 Packaging WAR..."
+          echo "📦 Building WAR with Maven..."
           mvn -B clean package -DskipTests
 
-          echo "🔍 Looking for WAR..."
           WAR_PATH=$(find . -type f -path "*/target/webapp.war" | head -n1 || true)
-
           if [ -z "$WAR_PATH" ]; then
             echo "❌ ERROR: No webapp.war found after build"
             exit 1
           fi
-
           echo "✅ Found WAR at $WAR_PATH"
         '''
         archiveArtifacts artifacts: '**/target/*.war', fingerprint: true
-        stash name: 'artifact', includes: '**/target/*.war'
       }
     }
 
     stage('Copy WAR to Docker host') {
-      agent { label 'built-in' }
       steps {
-        unstash 'artifact'
         sshagent(credentials: [env.SSH_CRED_ID]) {
           sh '''
             set -euo pipefail
             WAR_PATH=$(find . -type f -path "*/target/webapp.war" | head -n1 || true)
-
             if [ -z "$WAR_PATH" ]; then
-              echo "❌ ERROR: No WAR available to copy"
+              echo "❌ ERROR: WAR not found in workspace"
               exit 1
             fi
 
-            echo "📤 Copying $WAR_PATH to Docker host..."
+            echo "📤 Copying WAR to Docker host..."
             scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               "$WAR_PATH" ubuntu@${DOCKER_HOST_IP}:~/webapp.war || {
                 echo "❌ ERROR: SCP failed"
                 exit 1
             }
 
-            echo "🔍 Verifying on remote..."
             ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${DOCKER_HOST_IP} '
               set -e
               if [ ! -f ~/webapp.war ]; then
-                echo "❌ ERROR: webapp.war missing on remote"
+                echo "❌ ERROR: WAR missing on Docker host"
                 exit 1
               fi
+              echo "✅ WAR is on Docker host:"
               ls -lh ~/webapp.war
-              file ~/webapp.war || true
             '
           '''
         }
       }
     }
 
-    stage('Build & Push Docker image') {
-      agent { label 'built-in' }
+    stage('Build & Push Docker Image') {
       steps {
         withCredentials([usernamePassword(credentialsId: env.REG_CRED_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
           sshagent(credentials: [env.SSH_CRED_ID]) {
@@ -105,18 +92,16 @@ pipeline {
                 cd "$HOME"
 
                 if [ ! -f webapp.war ]; then
-                  echo "❌ ERROR: webapp.war not found, aborting Docker build"
+                  echo "❌ ERROR: webapp.war missing on remote"
                   exit 1
                 fi
 
-                echo "📝 Writing Dockerfile..."
                 cat > Dockerfile <<EOF
 FROM tomcat:9.0-jdk21-temurin
 COPY webapp.war /usr/local/tomcat/webapps/ROOT.war
 EXPOSE 8080
 EOF
 
-                echo "🐳 Building Docker image..."
                 echo "${PASS}" | docker login -u "${USER}" --password-stdin
                 docker build -t ${REPO}:${IMAGE_TAG} .
                 docker tag ${REPO}:${IMAGE_TAG} ${REPO}:latest
@@ -129,8 +114,7 @@ EOF
       }
     }
 
-    stage('Deploy container') {
-      agent { label 'built-in' }
+    stage('Deploy Container') {
       steps {
         sshagent(credentials: [env.SSH_CRED_ID]) {
           sh '''
@@ -147,11 +131,11 @@ EOF
   }
 
   post {
-    always {
-      echo "✅ Pipeline finished. Image: ${REPO}:${IMAGE_TAG}"
+    success {
+      echo "✅ SUCCESS: ${APP_NAME} deployed to Docker host"
     }
     failure {
-      echo "❌ Pipeline FAILED — check logs above"
+      echo "❌ FAILURE: Pipeline stopped due to error"
     }
   }
 }
