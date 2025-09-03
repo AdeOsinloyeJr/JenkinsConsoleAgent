@@ -4,7 +4,7 @@ pipeline {
 
   environment {
     DOCKER_HOST_IP = '172.31.47.162'                 // your Docker host
-    DOCKER_REPO    = 'your-dockerhub-user/webapp'    // e.g. adeosinloyejr/webapp
+    DOCKER_REPO    = 'djatl1/webapp'    // e.g. adeosinloyejr/webapp
     IMAGE_TAG      = "build-${env.BUILD_NUMBER}"
   }
 
