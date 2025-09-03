@@ -43,34 +43,35 @@ pipeline {
       }
     }
 
-    stage('Build & Push Docker Image') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sshagent(credentials: ['ubuntu']) {
-            sh '''
-              set -e
-              ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@${DOCKER_HOST_IP}" bash -lc "
-                set -e
-                cd \$HOME
+   stage('Build & Push Docker Image') {
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+      sshagent(credentials: ['ubuntu']) {
+        sh """
+          set -e
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "ubuntu@${DOCKER_HOST_IP}" 'bash -s' <<'EOSSH'
+set -e
+cd ~
 
-                echo '📝 Writing Dockerfile...'
-                cat > Dockerfile <<'EOF'
+echo "📝 Writing Dockerfile..."
+cat > Dockerfile <<'EOF'
 FROM tomcat:9.0-jdk21-temurin
 COPY webapp.war /usr/local/tomcat/webapps/ROOT.war
 EXPOSE 8080
 EOF
 
-                echo '${DOCKER_PASS}' | docker login -u '${DOCKER_USER}' --password-stdin
-                docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
-                docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
-                docker push ${DOCKER_REPO}:${IMAGE_TAG}
-                docker push ${DOCKER_REPO}:latest
-              "
-            '''
-          }
-        }
+echo '${DOCKER_PASS}' | docker login -u '${DOCKER_USER}' --password-stdin
+docker build -t ${DOCKER_REPO}:${IMAGE_TAG} .
+docker tag ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest
+docker push ${DOCKER_REPO}:${IMAGE_TAG}
+docker push ${DOCKER_REPO}:latest
+EOSSH
+        """
       }
     }
+  }
+}
+
 
     stage('Deploy Container') {
       steps {
