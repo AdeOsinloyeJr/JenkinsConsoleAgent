@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HOST = "172.31.44.202"
+        DOCKER_HOST = "172.31.47.162"
         REPO = "adeosinloyejr/webapp"   // Replace with your Docker Hub repo
         IMAGE_TAG = "v${BUILD_NUMBER}"
     }
